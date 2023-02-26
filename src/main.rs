@@ -1,14 +1,28 @@
-use std::io::{Read, Write};
+use std::io::{Write, BufReader, BufRead};
 use std::net::{TcpListener, TcpStream};
+use std::thread;
+use itertools::{Either, Itertools};
 
 fn handle_client(mut stream: TcpStream) {
-    let mut buffer = [0; 1024];
+    
+    let buf_reader = BufReader::new(&stream);
 
-    stream.read(&mut buffer).unwrap();
+    // this will terminate the tcp-stream since we are reading all the lines in a tcp stream
+    // but the tcp stream only closed only when the server returns the response only so the client will keep the
+    // tcp-stream open 
+    let (http_request, _failures): (Vec<_>, Vec<_>) = buf_reader
+        .lines()
+        .partition_map(|result| match result {
+            Ok(value) => Either::Left(value),
+            Err(err) => Either::Right(err)
+        });
 
-    let response = format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n");
+    println!("Request: {:#?}", http_request);
+    let response = format!("HTTP/1.1 200 OK\r\n\r\n");
     
     stream.write(response.as_bytes()).unwrap();
+    stream.flush().unwrap();
+
 }
 
 fn main() {
@@ -16,8 +30,11 @@ fn main() {
 
     loop {
         let (stream, _) = listener.accept().unwrap();
-        handle_client(stream);
+        thread::spawn(|| {
+            handle_client(stream);
+        });
     }
+
     // for stream in listener.incoming() {
     //     match stream {
     //         Ok(stream) => {

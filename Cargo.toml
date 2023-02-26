@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 http = "0.2.9"
+itertools = "0.10.5"
