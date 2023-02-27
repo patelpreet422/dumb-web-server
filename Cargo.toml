@@ -8,3 +8,7 @@ edition = "2021"
 [dependencies]
 http = "0.2.9"
 itertools = "0.10.5"
+
+[dependencies.ctrlc]
+version = "3.2.5"
+features = ["termination"]
