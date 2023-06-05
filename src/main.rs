@@ -6,6 +6,40 @@ use std::thread::{self};
 use std::time::Duration;
 use web_server::ThreadPool;
 
+fn handle_client_sse(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<String>>>) {
+    let buf_reader = BufReader::new(&stream);
+
+    let http_request: Vec<_> = buf_reader
+        .lines()
+        .map(|result| result.unwrap())
+        .take_while(|line| !line.is_empty())
+        .collect();
+
+    println!("Request: {:#?}", http_request);
+
+    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n");
+    stream.write(response.as_bytes()).unwrap();
+    stream.flush().unwrap();
+
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+
+        let received_message = rx.lock().unwrap().recv();
+
+        match received_message {
+            Ok(data) => {
+                let sse_event = format!("data: {}\n\n", data);
+                stream.write_all(sse_event.as_bytes()).unwrap();
+                stream.flush().unwrap();
+            }
+            Err(_) => {
+                println!("Producer might have closed the channel");
+                break;
+            }
+        }
+    }
+}
+
 // generate random data and each new connection will read any random data generated from this producer
 // since we are using mpsc (i.e., multiple producer single consumer) channel
 // each active connection will get any random data produced by producer and not the copy of data
@@ -36,7 +70,7 @@ fn start_message_passing_thread(tx: Sender<String>) {
     });
 }
 
-fn handle_client(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<String>>>) {
+fn handle_client_chunk(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<String>>>) {
     
     let buf_reader = BufReader::new(&stream);
 
@@ -89,7 +123,7 @@ fn main() {
             Ok(stream) => {
                 // spawn a thread for each incoming request
                 pool.execute(move || {
-                    handle_client(stream, rx);
+                    handle_client_sse(stream, rx);
                 });
             }
             Err(e) => {
