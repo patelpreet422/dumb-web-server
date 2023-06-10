@@ -1,7 +1,7 @@
-use std::io::{Write, BufReader, BufRead};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{Sender, self};
 use std::thread::{self};
 use std::time::Duration;
 use web_server::ThreadPool;
@@ -29,10 +29,24 @@ fn handle_client_sse(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<String>
         match received_message {
             Ok(data) => {
                 let sse_event = format!("data: {}\n\n", data);
-                stream.write_all(sse_event.as_bytes()).unwrap();
+
+                let write_status = stream.write_all(sse_event.as_bytes());
+
+                match write_status {
+                    Ok(_) => (),
+                    Err(e) => {
+                        println!(
+                            "failed to write to connection, connection may be broken: {}",
+                            e
+                        );
+                        break;
+                    }
+                }
+
                 stream.flush().unwrap();
             }
             Err(_) => {
+                stream.write(format!("{}\r\n\r\n", 0).as_bytes()).unwrap();
                 println!("Producer might have closed the channel");
                 break;
             }
@@ -47,31 +61,21 @@ fn handle_client_sse(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<String>
 fn start_message_passing_thread(tx: Sender<String>) {
     thread::spawn(move || {
         // Simulating the server sending messages
-        let messages = vec![
-            "Hello",
-            "This",
-            "Is",
-            "A",
-            "Message",
-            "From",
-            "The",
-            "Server",
-        ];
+        let mut message = 1;
 
         loop {
-            for message in &messages {
-                // Send the message through the channel
-                tx.send(message.to_string()).expect("Failed to send message");
+            // Send the message through the channel
+            tx.send(message.to_string())
+                .expect("Failed to send message");
 
-                // Wait for a short interval between messages
-                thread::sleep(Duration::from_secs(1));
-            }
+            // Wait for a short interval between messages
+            thread::sleep(Duration::from_secs(1));
+            message = message + 1;
         }
     });
 }
 
 fn handle_client_chunk(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<String>>>) {
-    
     let buf_reader = BufReader::new(&stream);
 
     let http_request: Vec<_> = buf_reader
@@ -81,9 +85,23 @@ fn handle_client_chunk(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<Strin
         .collect();
 
     println!("Request: {:#?}", http_request);
-    
-    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n");
-    stream.write(response.as_bytes());
+
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n"
+    );
+
+    let write_status = stream.write(response.as_bytes());
+
+    match write_status {
+        Ok(_) => (),
+        Err(e) => {
+            println!(
+                "failed to write to connection, connection may be broken: {}",
+                e
+            );
+            return;
+        }
+    }
 
     loop {
         thread::sleep(Duration::from_secs(1));
@@ -93,7 +111,20 @@ fn handle_client_chunk(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<Strin
         match received_message {
             Ok(data) => {
                 println!("Received message: {}", data);
-                stream.write(format!("{}\r\n{}\r\n", data.len(), data).as_bytes()).unwrap();
+
+                let write_status =
+                    stream.write(format!("{}\r\n{}\r\n", data.len(), data).as_bytes());
+
+                match write_status {
+                    Ok(_) => (),
+                    Err(e) => {
+                        println!(
+                            "failed to write to connection, connection may be broken: {}",
+                            e
+                        );
+                        break;
+                    }
+                }
                 stream.flush().unwrap();
             }
             Err(_) => {
@@ -103,8 +134,6 @@ fn handle_client_chunk(mut stream: TcpStream, rx: Arc<Mutex<mpsc::Receiver<Strin
             }
         }
     }
-
-    stream.flush().unwrap();
 }
 
 fn main() {
