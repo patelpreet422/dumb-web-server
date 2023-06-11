@@ -2,7 +2,7 @@ import axios, { AxiosResponse } from 'axios';
 import EventSource from 'eventsource';
 import { url } from 'inspector';
 
-const trasnferEncodingChunked = async () => {
+const transferEncodingChunked = async () => {
     const response = await axios.get('http://localhost:8080', { responseType: 'stream' });
 
     const stream = response.data;
@@ -33,4 +33,4 @@ const sse = async () => {
     };
 }
 
-await sse()
+await transferEncodingChunked()
